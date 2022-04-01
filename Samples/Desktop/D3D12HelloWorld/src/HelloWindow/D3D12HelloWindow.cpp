@@ -11,6 +11,11 @@
 
 #include "stdafx.h"
 #include "D3D12HelloWindow.h"
+#include "d3dx12.h"
+
+#include <iostream>
+#include <sstream>
+#include <string>
 
 D3D12HelloWindow::D3D12HelloWindow(UINT width, UINT height, std::wstring name) :
     DXSample(width, height, name),
@@ -23,6 +28,90 @@ void D3D12HelloWindow::OnInit()
 {
     LoadPipeline();
     LoadAssets();
+}
+
+inline std::string StringFormatMemorySize(unsigned long long MemorySize)
+{
+	static const char* pExp[] = { "B", "KB", "MB", "GB", "TB", "PB", "EB" };
+	int c = 0;
+	for (c = 0; c < _countof(pExp); c++)
+	{
+		unsigned long long m = (unsigned long long)1 << ((c + 1) * 10);
+		if (MemorySize < m)
+			break;
+	}
+	double n = MemorySize / (double)((unsigned long long)1 << (c * 10));
+    std::string string;
+    string += std::to_string(n) + pExp[c];
+    return string;
+}
+
+#define CHECKHR(hr) assert(hr == S_OK)
+
+void TestCommitPlaced(IDXGIAdapter1* adapter1, ID3D12Device* device)
+{
+    uint64_t nb_res = 20000;
+    std::vector<ID3D12Resource*> resources = std::vector<ID3D12Resource*>();
+
+    D3D12_HEAP_PROPERTIES heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+
+    IDXGIAdapter3* adapter;
+    CHECKHR(adapter1->QueryInterface(&adapter));
+    
+    //for (int i = 1; i <= 20; ++i) {
+		uint64_t resourceSize = 12 * 1024;
+		D3D12_RESOURCE_DESC resDesc = CD3DX12_RESOURCE_DESC::Buffer(resourceSize);
+    bool bCommitted = true;
+
+	DXGI_QUERY_VIDEO_MEMORY_INFO memory;
+     if (bCommitted) {
+		for (int i = 0; i < nb_res; ++i)
+		{
+			ID3D12Resource* resource;
+			CHECKHR(device->CreateCommittedResource(&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER, nullptr, IID_PPV_ARGS(&resource)));
+			resources.push_back(resource);
+		}
+
+		adapter->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &memory);
+		while (!resources.empty())
+		{
+			ID3D12Resource* resource = resources.back();
+			resource->Release();
+			resources.pop_back();
+		}
+	} else {
+
+		D3D12_HEAP_DESC heapDesc = {};
+		heapDesc.SizeInBytes = nb_res * D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+		heapDesc.Properties.Type = D3D12_HEAP_TYPE_DEFAULT;
+		ID3D12Heap* heap;
+		CHECKHR(device->CreateHeap(&heapDesc, IID_PPV_ARGS(&heap)));
+		for (uint64_t i = 0; i < nb_res; ++i)
+		{
+			ID3D12Resource* resource;
+			CHECKHR(device->CreatePlacedResource(heap, i * D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT, &resDesc, 
+				D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER, nullptr, IID_PPV_ARGS(&resource)));
+            resources.push_back(resource);
+		}
+		adapter->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &memory);
+
+		while (!resources.empty())
+		{
+			ID3D12Resource* resource = resources.back();
+			resource->Release();
+			resources.pop_back();
+		}
+        heap->Release();
+    }
+		std::ostringstream ss;
+		//ss << "resource Size : "<< StringFormatMemorySize(resourceSize) << " Number of resources "<< nb_res << " placed " << StringFormatMemorySize(memoryPlaced.CurrentUsage) << " committed " << StringFormatMemorySize(memoryCommit.CurrentUsage) << std::endl;
+		ss << ""<< StringFormatMemorySize(resourceSize) << " "<< nb_res << " " << (bCommitted?"committed ": "placed ") << StringFormatMemorySize(memory.CurrentUsage) << std::endl;
+		OutputDebugStringA(ss.str().c_str());
+    //}
+
+    
+
+
 }
 
 // Load the rendering pipeline dependencies.
@@ -48,9 +137,10 @@ void D3D12HelloWindow::LoadPipeline()
     ComPtr<IDXGIFactory4> factory;
     ThrowIfFailed(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)));
 
+	ComPtr<IDXGIAdapter4> warpAdapter;
+	ComPtr<IDXGIAdapter1> hardwareAdapter;
     if (m_useWarpDevice)
     {
-        ComPtr<IDXGIAdapter> warpAdapter;
         ThrowIfFailed(factory->EnumWarpAdapter(IID_PPV_ARGS(&warpAdapter)));
 
         ThrowIfFailed(D3D12CreateDevice(
@@ -61,7 +151,6 @@ void D3D12HelloWindow::LoadPipeline()
     }
     else
     {
-        ComPtr<IDXGIAdapter1> hardwareAdapter;
         GetHardwareAdapter(factory.Get(), &hardwareAdapter);
 
         ThrowIfFailed(D3D12CreateDevice(
@@ -130,6 +219,8 @@ void D3D12HelloWindow::LoadPipeline()
     }
 
     ThrowIfFailed(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocator)));
+
+    TestCommitPlaced(hardwareAdapter.Get(), m_device.Get());
 }
 
 // Load the sample assets.
