@@ -47,24 +47,25 @@ inline std::string StringFormatMemorySize(unsigned long long MemorySize)
 }
 
 #define CHECKHR(hr) assert(hr == S_OK)
+#define TEST_COMMITTED
 
 void TestCommitPlaced(IDXGIAdapter1* adapter1, ID3D12Device* device)
 {
-    uint64_t nb_res = 20000;
+    uint64_t nb_res = 160000;
     std::vector<ID3D12Resource*> resources = std::vector<ID3D12Resource*>();
 
     D3D12_HEAP_PROPERTIES heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
 
+    // Need adapter 3 for QueryVideoMemoryInfo
     IDXGIAdapter3* adapter;
     CHECKHR(adapter1->QueryInterface(&adapter));
-    
-    //for (int i = 1; i <= 20; ++i) {
-		uint64_t resourceSize = 12 * 1024;
-		D3D12_RESOURCE_DESC resDesc = CD3DX12_RESOURCE_DESC::Buffer(resourceSize);
-    bool bCommitted = true;
+
+    // BUFFER of 32KB
+	uint64_t resourceSize = 16 * 1024;
+	D3D12_RESOURCE_DESC resDesc = CD3DX12_RESOURCE_DESC::Buffer(resourceSize);
 
 	DXGI_QUERY_VIDEO_MEMORY_INFO memory;
-     if (bCommitted) {
+#ifdef TEST_COMMITTED
 		for (int i = 0; i < nb_res; ++i)
 		{
 			ID3D12Resource* resource;
@@ -79,13 +80,14 @@ void TestCommitPlaced(IDXGIAdapter1* adapter1, ID3D12Device* device)
 			resource->Release();
 			resources.pop_back();
 		}
-	} else {
-
+#else
+        // Creation of a heap of nb_res * 64KB (64Kb for buffer alignement restriction)
 		D3D12_HEAP_DESC heapDesc = {};
 		heapDesc.SizeInBytes = nb_res * D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
 		heapDesc.Properties.Type = D3D12_HEAP_TYPE_DEFAULT;
 		ID3D12Heap* heap;
 		CHECKHR(device->CreateHeap(&heapDesc, IID_PPV_ARGS(&heap)));
+
 		for (uint64_t i = 0; i < nb_res; ++i)
 		{
 			ID3D12Resource* resource;
@@ -102,16 +104,11 @@ void TestCommitPlaced(IDXGIAdapter1* adapter1, ID3D12Device* device)
 			resources.pop_back();
 		}
         heap->Release();
-    }
+#endif
+        // Print of results
 		std::ostringstream ss;
-		//ss << "resource Size : "<< StringFormatMemorySize(resourceSize) << " Number of resources "<< nb_res << " placed " << StringFormatMemorySize(memoryPlaced.CurrentUsage) << " committed " << StringFormatMemorySize(memoryCommit.CurrentUsage) << std::endl;
-		ss << ""<< StringFormatMemorySize(resourceSize) << " "<< nb_res << " " << (bCommitted?"committed ": "placed ") << StringFormatMemorySize(memory.CurrentUsage) << std::endl;
+		ss << ""<< StringFormatMemorySize(resourceSize) << " "<< nb_res << " " << StringFormatMemorySize(memory.CurrentUsage) << std::endl;
 		OutputDebugStringA(ss.str().c_str());
-    //}
-
-    
-
-
 }
 
 // Load the rendering pipeline dependencies.
